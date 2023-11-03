@@ -10,36 +10,132 @@
 ////////////////////////////////////////////////////////////////////////////////
 module MENU
 (
-   input         CLOCK_27,   // Input clock 27 MHz
+	input         CLOCK_27,
+`ifdef USE_CLOCK_50
+	input         CLOCK_50,
+`endif
 
-   output  [5:0] VGA_R,
-   output  [5:0] VGA_G,
-   output  [5:0] VGA_B,
-   output        VGA_HS,
-   output        VGA_VS,
+	output        LED,
+	output [VGA_BITS-1:0] VGA_R,
+	output [VGA_BITS-1:0] VGA_G,
+	output [VGA_BITS-1:0] VGA_B,
+	output        VGA_HS,
+	output        VGA_VS,
 
-   output        LED,
+`ifdef USE_HDMI
+	output        HDMI_RST,
+	output  [7:0] HDMI_R,
+	output  [7:0] HDMI_G,
+	output  [7:0] HDMI_B,
+	output        HDMI_HS,
+	output        HDMI_VS,
+	output        HDMI_PCLK,
+	output        HDMI_DE,
+	output        HDMI_SDA,
+	output        HDMI_SCL,
+`endif
 
-   input         SPI_SCK,
-   inout         SPI_DO,
-   input         SPI_DI,
-   input         SPI_SS2,
-   input         SPI_SS3,
-   input         SPI_SS4,
-   input         CONF_DATA0,
+	input         SPI_SCK,
+	inout         SPI_DO,
+	input         SPI_DI,
+	input         SPI_SS2,    // data_io
+	input         SPI_SS3,    // OSD
+	input         CONF_DATA0, // SPI_SS for user_io
 
-   output [12:0] SDRAM_A,
-   inout  [15:0] SDRAM_DQ,
-   output        SDRAM_DQML,
-   output        SDRAM_DQMH,
-   output        SDRAM_nWE,
-   output        SDRAM_nCAS,
-   output        SDRAM_nRAS,
-   output        SDRAM_nCS,
-   output  [1:0] SDRAM_BA,
-   output        SDRAM_CLK,
-   output        SDRAM_CKE
+`ifdef USE_QSPI
+	input         QSCK,
+	input         QCSn,
+	inout   [3:0] QDAT,
+`endif
+`ifndef NO_DIRECT_UPLOAD
+	input         SPI_SS4,
+`endif
+
+	output [12:0] SDRAM_A,
+	inout  [15:0] SDRAM_DQ,
+	output        SDRAM_DQML,
+	output        SDRAM_DQMH,
+	output        SDRAM_nWE,
+	output        SDRAM_nCAS,
+	output        SDRAM_nRAS,
+	output        SDRAM_nCS,
+	output  [1:0] SDRAM_BA,
+	output        SDRAM_CLK,
+	output        SDRAM_CKE,
+
+`ifdef DUAL_SDRAM
+	output [12:0] SDRAM2_A,
+	inout  [15:0] SDRAM2_DQ,
+	output        SDRAM2_DQML,
+	output        SDRAM2_DQMH,
+	output        SDRAM2_nWE,
+	output        SDRAM2_nCAS,
+	output        SDRAM2_nRAS,
+	output        SDRAM2_nCS,
+	output  [1:0] SDRAM2_BA,
+	output        SDRAM2_CLK,
+	output        SDRAM2_CKE,
+`endif
+
+	output        AUDIO_L,
+	output        AUDIO_R,
+`ifdef I2S_AUDIO
+	output        I2S_BCK,
+	output        I2S_LRCK,
+	output        I2S_DATA,
+`endif
+`ifdef USE_AUDIO_IN
+	input         AUDIO_IN,
+`endif
+	input         UART_RX,
+	output        UART_TX
+
 );
+
+`ifdef NO_DIRECT_UPLOAD
+localparam bit DIRECT_UPLOAD = 0;
+wire SPI_SS4 = 1;
+`else
+localparam bit DIRECT_UPLOAD = 1;
+`endif
+
+`ifdef USE_QSPI
+localparam bit QSPI = 1;
+assign QDAT = 4'hZ;
+`else
+localparam bit QSPI = 0;
+`endif
+
+`ifdef VGA_8BIT
+localparam VGA_BITS = 8;
+`else
+localparam VGA_BITS = 6;
+`endif
+
+`ifdef BIG_OSD
+localparam bit BIG_OSD = 1;
+localparam SEP = "-;";
+`else
+localparam bit BIG_OSD = 0;
+localparam SEP = "";
+`endif
+
+// remove this if the 2nd chip is actually used
+`ifdef DUAL_SDRAM
+assign SDRAM2_A = 13'hZZZZ;
+assign SDRAM2_BA = 0;
+assign SDRAM2_DQML = 0;
+assign SDRAM2_DQMH = 0;
+assign SDRAM2_CKE = 0;
+assign SDRAM2_CLK = 0;
+assign SDRAM2_nCS = 1;
+assign SDRAM2_DQ = 16'hZZZZ;
+assign SDRAM2_nCAS = 1;
+assign SDRAM2_nRAS = 1;
+assign SDRAM2_nWE = 1;
+`endif
+
+`include "build_id.v"
 
 wire clk_x2, clk_pix, clk_ram, pll_locked;
 pll pll
@@ -66,12 +162,12 @@ localparam CONF_STR = {
 	"V,",`BUILD_DATE
 };
 
-wire		   scandoubler_disable;
-wire		   ypbpr;
+wire           scandoubler_disable;
+wire           ypbpr;
 wire           no_csync;
 wire    [63:0] status;
 
-user_io #(.STRLEN($size(CONF_STR)>>3), .FEATURES(32'd1), .ROM_DIRECT_UPLOAD(1'b1)) user_io
+user_io #(.STRLEN($size(CONF_STR)>>3), .FEATURES(32'd1 | (BIG_OSD << 13)), .ROM_DIRECT_UPLOAD(DIRECT_UPLOAD)) user_io
 (
 	.clk_sys(clk_x2),
 	.conf_str(CONF_STR),
@@ -101,7 +197,7 @@ wire [24:0] ioctl_addr;
 wire  [7:0] ioctl_din;
 wire  [7:0] ioctl_dout;
 
-data_io #(.ROM_DIRECT_UPLOAD(1'b1)) data_io(
+data_io #(.ROM_DIRECT_UPLOAD(DIRECT_UPLOAD)) data_io(
 	.clk_sys       ( clk_ram      ),
 	.SPI_SCK       ( SPI_SCK      ),
 	.SPI_SS2       ( SPI_SS2      ),
@@ -221,27 +317,29 @@ end
 
 ///// Noise
 reg  [7:0] cos_out;
-wire [5:0] cos_g = cos_out[7:3]+6'd32;
+wire [7:0] cos_g = cos_out[7:1]+6'd32;
 cos cos(vvc + {vc, 2'b00}, cos_out);
 
-wire [5:0] comp_v = (cos_g >= rnd_c) ? cos_g - rnd_c : 6'd0;
+wire [7:0] comp_v = (cos_g >= rnd_c) ? cos_g - rnd_c : 8'd0;
 
 ///// Bitmap
-wire [5:0] bmp_r = cpu_q[23:18];
-wire [5:0] bmp_g = cpu_q[15:10];
-wire [5:0] bmp_b = cpu_q[7:2];
+wire [VGA_BITS-1:0] bmp_r = cpu_q[23:24-VGA_BITS];
+wire [VGA_BITS-1:0] bmp_g = cpu_q[15:16-VGA_BITS];
+wire [VGA_BITS-1:0] bmp_b = cpu_q[7:8-VGA_BITS];
 
 ///// Final pixel value
-wire [5:0] R_in = !viden ? 6'd0 : bmp_loaded ? bmp_r : comp_v;
-wire [5:0] G_in = !viden ? 6'd0 : bmp_loaded ? bmp_g : comp_v;
-wire [5:0] B_in = !viden ? 6'd0 : bmp_loaded ? bmp_b : comp_v;
+wire [VGA_BITS-1:0] R_in = !viden ? {VGA_BITS{1'b0}} : bmp_loaded ? bmp_r : comp_v[7:8-VGA_BITS];
+wire [VGA_BITS-1:0] G_in = !viden ? {VGA_BITS{1'b0}} : bmp_loaded ? bmp_g : comp_v[7:8-VGA_BITS];
+wire [VGA_BITS-1:0] B_in = !viden ? {VGA_BITS{1'b0}} : bmp_loaded ? bmp_b : comp_v[7:8-VGA_BITS];
 
 mist_video #(
-	.COLOR_DEPTH(6),
+	.COLOR_DEPTH(VGA_BITS),
 	.SD_HCNT_WIDTH(10),
 	.OSD_X_OFFSET(10),
 	.OSD_Y_OFFSET(0),
-	.OSD_COLOR(4)
+	.OSD_COLOR(4),
+	.OUT_COLOR_DEPTH(VGA_BITS),
+	.BIG_OSD(BIG_OSD)
 ) mist_video (
 	.clk_sys        ( clk_x2           ),
 	.SPI_SCK        ( SPI_SCK          ),
