@@ -8,7 +8,7 @@
 //
 //
 ////////////////////////////////////////////////////////////////////////////////
-module MENU
+module guest_top
 (
 	input         CLOCK_27,
 `ifdef USE_CLOCK_50
@@ -147,7 +147,7 @@ pll pll
 	.locked(pll_locked)
 );
 
-assign SDRAM_CLK = clk_ram;
+assign SDRAM_CLK = ~clk_ram;
 assign SDRAM_CKE = 1;
 //______________________________________________________________________________
 //
